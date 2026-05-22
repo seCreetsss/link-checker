@@ -1,36 +1,57 @@
-export async function POST(request) {
+function advancedLinkMonitor() {
 
-  let body = {};
-  try {
-    body = await request.json();
-  } catch (e) {}
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Links");
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
 
-  const urls = body.urls || [];
+  const data = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
 
-  const results = await Promise.all(
-    urls.map(url => checkUrl(url))
-  );
+  const statusOut = [];
+  const timestampOut = [];
+  const now = new Date();
 
-  return new Response(JSON.stringify(results), {
-    headers: { "Content-Type": "application/json" }
-  });
-}
+  data.forEach((row, i) => {
 
-async function checkUrl(url) {
-  if (!url) return { url, code: "Empty", status: "Warning" };
+    let url = row[0];
 
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
+    if (!url) {
+      statusOut.push([""]);
+      timestampOut.push([""]);
+      return;
+    }
 
-    const response = await fetch(url, {
-      method: "GET",
-      redirect: "follow",
-      signal: controller.signal,
-      headers: {
-        "User-Agent": "Mozilla/5.0"
+    if (!/^https?:\/\//i.test(url)) {
+      url = "https://" + url;
+    }
+
+    const api = "https://api.microlink.io/?url=" + encodeURIComponent(url);
+
+    let status = "Warning";
+    let code = "Error";
+
+    try {
+      const res = UrlFetchApp.fetch(api, {
+        muteHttpExceptions: true
+      });
+
+      const json = JSON.parse(res.getContentText());
+
+      if (json.status === "success") {
+        code = 200;
+        status = "Active";
+      } else if (json.status === "fail") {
+        code = 404;
+        status = "Broken";
       }
-    });
 
-    clearTimeout(timeout);
+    } catch (e) {
+      status = "Warning";
+      code = "Error";
+    }
+
+    statusOut.push([`${status} (${code})`]);
+    timestampOut.push([now]);
+
+    Logger.log(`${i + 2}: ${status} → ${url}`);
+  });
 
